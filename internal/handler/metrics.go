@@ -30,10 +30,7 @@ func (h *MetricsHandler) Update(w http.ResponseWriter, r *http.Request) {
 
 	// Парсим путь: /update/<ТИП>/<ИМЯ>/<ЗНАЧЕНИЕ>
 	path := strings.TrimPrefix(r.URL.Path, "/update/")
-	
-	// Удаляем завершающие слэши
 	path = strings.TrimSuffix(path, "/")
-	
 	parts := strings.Split(path, "/")
 
 	// Проверяем количество частей пути
@@ -51,7 +48,7 @@ func (h *MetricsHandler) Update(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Metric name is required", http.StatusNotFound)
 		return
 	}
-	
+
 	// Проверяем наличие значения
 	if metricValue == "" {
 		http.Error(w, "Metric value is required", http.StatusBadRequest)
@@ -68,6 +65,7 @@ func (h *MetricsHandler) Update(w http.ResponseWriter, r *http.Request) {
 		}
 		h.storage.UpdateCounter(metricName, value)
 		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("OK"))
 
 	case model.Gauge:
 		value, err := strconv.ParseFloat(metricValue, 64)
@@ -77,6 +75,7 @@ func (h *MetricsHandler) Update(w http.ResponseWriter, r *http.Request) {
 		}
 		h.storage.UpdateGauge(metricName, value)
 		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("OK"))
 
 	default:
 		http.Error(w, "Invalid metric type", http.StatusBadRequest)

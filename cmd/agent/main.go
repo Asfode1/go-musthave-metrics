@@ -21,14 +21,14 @@ func main() {
 	serverURL := flag.String("a", defaultServerURL, "HTTP server address")
 	pollIntervalSec := flag.Int("p", defaultPollInterval, "Poll interval in seconds")
 	reportIntervalSec := flag.Int("r", defaultReportInterval, "Report interval in seconds")
-	
+
 	// Чтобы валидировать только разрешенные флаги
 	knownFlags := map[string]bool{
 		"a": true,
 		"p": true,
 		"r": true,
 	}
-	
+
 	// Чтобы предотвратить использование неизвестных флагов и обеспечить валидность конфигурации
 	for i := 1; i < len(os.Args); i++ {
 		arg := os.Args[i]
@@ -48,10 +48,10 @@ func main() {
 			}
 		}
 	}
-	
+
 	// Чтобы извлечь значения флагов из аргументов
 	flag.Parse()
-	
+
 	// Чтобы предотвратить использование неизвестных аргументов
 	if len(flag.Args()) > 0 {
 		fmt.Fprintf(os.Stderr, "Error: unknown arguments: %v\n", flag.Args())

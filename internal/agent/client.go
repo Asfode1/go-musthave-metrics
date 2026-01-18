@@ -2,6 +2,7 @@ package agent
 
 import (
 	"fmt"
+	"io"
 	"net/http"
 	"time"
 )
@@ -48,6 +49,12 @@ func (c *Client) SendMetric(metric MetricValue) error {
 		return fmt.Errorf("failed to send request: %w", err)
 	}
 	defer resp.Body.Close()
+
+	// Чтобы прочитать тело ответа и избежать EOF ошибок
+	_, err = io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("failed to read response body: %w", err)
+	}
 
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("unexpected status code: %d", resp.StatusCode)
