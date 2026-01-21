@@ -1,9 +1,11 @@
 package agent
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"time"
 )
 
@@ -28,9 +30,9 @@ func (c *Client) SendMetric(metric MetricValue) error {
 	var valueStr string
 	switch v := metric.Value.(type) {
 	case int64:
-		valueStr = fmt.Sprintf("%d", v)
+		valueStr = strconv.FormatInt(v, 10)
 	case float64:
-		valueStr = fmt.Sprintf("%g", v)
+		valueStr = strconv.FormatFloat(v, 'g', -1, 64)
 	default:
 		return fmt.Errorf("unsupported metric value type: %T", v)
 	}
@@ -64,11 +66,16 @@ func (c *Client) SendMetric(metric MetricValue) error {
 }
 
 // SendMetrics отправляет все метрики на сервер
+// Продолжает отправку даже при ошибках отдельных метрик, чтобы максимально доставить данные
 func (c *Client) SendMetrics(metrics []MetricValue) error {
+	var errs []error
 	for _, metric := range metrics {
 		if err := c.SendMetric(metric); err != nil {
-			return fmt.Errorf("failed to send metric %s: %w", metric.Name, err)
+			errs = append(errs, fmt.Errorf("failed to send metric %s: %w", metric.Name, err))
 		}
+	}
+	if len(errs) > 0 {
+		return errors.Join(errs...)
 	}
 	return nil
 }

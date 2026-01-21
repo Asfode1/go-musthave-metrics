@@ -17,7 +17,7 @@ type MetricValue struct {
 
 // Collector собирает метрики из runtime
 type Collector struct {
-	mu         sync.RWMutex
+	mu         sync.Mutex
 	pollCount  int64
 	randomSeed *rand.Rand
 }
@@ -33,6 +33,7 @@ func NewCollector() *Collector {
 func (c *Collector) Collect() []MetricValue {
 	c.mu.Lock()
 	c.pollCount++
+	pollCount := c.pollCount
 	c.mu.Unlock()
 
 	var m runtime.MemStats
@@ -70,9 +71,6 @@ func (c *Collector) Collect() []MetricValue {
 	metrics = append(metrics, MetricValue{Type: model.Gauge, Name: "TotalAlloc", Value: float64(m.TotalAlloc)})
 
 	// Чтобы отслеживать количество опросов и иметь тестовую метрику
-	c.mu.RLock()
-	pollCount := c.pollCount
-	c.mu.RUnlock()
 	metrics = append(metrics, MetricValue{Type: model.Counter, Name: "PollCount", Value: pollCount})
 
 	// Чтобы иметь тестовую метрику для проверки работы системы
@@ -80,11 +78,4 @@ func (c *Collector) Collect() []MetricValue {
 	metrics = append(metrics, MetricValue{Type: model.Gauge, Name: "RandomValue", Value: randomValue})
 
 	return metrics
-}
-
-// GetPollCount возвращает текущее значение счетчика PollCount
-func (c *Collector) GetPollCount() int64 {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	return c.pollCount
 }

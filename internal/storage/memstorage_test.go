@@ -101,3 +101,37 @@ func TestMemStorage_GetAllGauges(t *testing.T) {
 		t.Errorf("Expected gauge2 to be 2.2, got %f", gauges["gauge2"])
 	}
 }
+
+func TestMemStorage_SetCounter(t *testing.T) {
+	storage := NewMemStorage()
+
+	// Устанавливаем значение
+	storage.SetCounter("testCounter", 10)
+	value, ok := storage.GetCounter("testCounter")
+	if !ok {
+		t.Fatal("Counter should exist")
+	}
+	if value != 10 {
+		t.Errorf("Expected 10, got %d", value)
+	}
+
+	// Устанавливаем новое значение (должно замениться, а не добавиться)
+	storage.SetCounter("testCounter", 20)
+	value, ok = storage.GetCounter("testCounter")
+	if !ok {
+		t.Fatal("Counter should exist")
+	}
+	if value != 20 {
+		t.Errorf("Expected 20 (replaced), got %d", value)
+	}
+
+	// Проверяем, что SetCounter не суммирует значения
+	storage.SetCounter("testCounter", 5)
+	value, ok = storage.GetCounter("testCounter")
+	if !ok {
+		t.Fatal("Counter should exist")
+	}
+	if value != 5 {
+		t.Errorf("Expected 5 (replaced), got %d", value)
+	}
+}

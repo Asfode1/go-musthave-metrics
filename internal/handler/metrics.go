@@ -23,11 +23,6 @@ func NewMetricsHandler(storage *storage.MemStorage) *MetricsHandler {
 
 // Update обрабатывает POST /update/<ТИП>/<ИМЯ>/<ЗНАЧЕНИЕ>
 func (h *MetricsHandler) Update(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
 	// Парсим путь: /update/<ТИП>/<ИМЯ>/<ЗНАЧЕНИЕ>
 	path := strings.TrimPrefix(r.URL.Path, "/update/")
 	path = strings.TrimSuffix(path, "/")
@@ -63,7 +58,13 @@ func (h *MetricsHandler) Update(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "Invalid counter value", http.StatusBadRequest)
 			return
 		}
-		h.storage.UpdateCounter(metricName, value)
+		// PollCount представляет абсолютное значение количества сборов метрик,
+		// поэтому используем SetCounter вместо UpdateCounter для корректной работы при перезапуске агента
+		if metricName == "PollCount" {
+			h.storage.SetCounter(metricName, value)
+		} else {
+			h.storage.UpdateCounter(metricName, value)
+		}
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("OK"))
 

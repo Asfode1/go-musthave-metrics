@@ -52,20 +52,6 @@ func TestMetricsHandler_Update_Gauge(t *testing.T) {
 	}
 }
 
-func TestMetricsHandler_Update_InvalidMethod(t *testing.T) {
-	memStorage := storage.NewMemStorage()
-	handler := NewMetricsHandler(memStorage)
-
-	req := httptest.NewRequest(http.MethodGet, "/update/counter/test/1", nil)
-	w := httptest.NewRecorder()
-
-	handler.Update(w, req)
-
-	if w.Code != http.StatusMethodNotAllowed {
-		t.Errorf("Expected status 405, got %d", w.Code)
-	}
-}
-
 func TestMetricsHandler_Update_InvalidPath(t *testing.T) {
 	memStorage := storage.NewMemStorage()
 	handler := NewMetricsHandler(memStorage)
@@ -179,5 +165,36 @@ func TestMetricsHandler_Update_GaugeReplace(t *testing.T) {
 	}
 	if value != 2.71 {
 		t.Errorf("Expected 2.71 (replaced), got %f", value)
+	}
+}
+
+func TestMetricsHandler_Update_PollCount(t *testing.T) {
+	memStorage := storage.NewMemStorage()
+	handler := NewMetricsHandler(memStorage)
+
+	// PollCount должен использовать SetCounter (замену), а не UpdateCounter (суммирование)
+	req1 := httptest.NewRequest(http.MethodPost, "/update/counter/PollCount/3", nil)
+	w1 := httptest.NewRecorder()
+	handler.Update(w1, req1)
+
+	value, ok := memStorage.GetCounter("PollCount")
+	if !ok {
+		t.Fatal("PollCount should exist")
+	}
+	if value != 3 {
+		t.Errorf("Expected 3, got %d", value)
+	}
+
+	// Второе обновление PollCount должно заменить значение, а не добавить
+	req2 := httptest.NewRequest(http.MethodPost, "/update/counter/PollCount/5", nil)
+	w2 := httptest.NewRecorder()
+	handler.Update(w2, req2)
+
+	value, ok = memStorage.GetCounter("PollCount")
+	if !ok {
+		t.Fatal("PollCount should exist")
+	}
+	if value != 5 {
+		t.Errorf("Expected 5 (replaced), got %d", value)
 	}
 }

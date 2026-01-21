@@ -26,6 +26,14 @@ func (s *MemStorage) UpdateCounter(name string, value int64) {
 	s.counters[name] += value
 }
 
+// SetCounter устанавливает абсолютное значение counter метрики (заменяет существующее)
+// Используется для метрик типа PollCount, которые представляют абсолютное значение, а не приращение
+func (s *MemStorage) SetCounter(name string, value int64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.counters[name] = value
+}
+
 // UpdateGauge обновляет значение gauge метрики (заменяет существующее)
 func (s *MemStorage) UpdateGauge(name string, value float64) {
 	s.mu.Lock()

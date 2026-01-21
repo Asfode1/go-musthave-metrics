@@ -45,22 +45,6 @@ func TestCollector_Collect(t *testing.T) {
 	}
 }
 
-func TestCollector_GetPollCount(t *testing.T) {
-	collector := NewCollector()
-
-	// Первый вызов Collect должен увеличить счетчик до 1
-	collector.Collect()
-	if collector.GetPollCount() != 1 {
-		t.Errorf("Expected pollCount to be 1, got %d", collector.GetPollCount())
-	}
-
-	// Второй вызов должен увеличить до 2
-	collector.Collect()
-	if collector.GetPollCount() != 2 {
-		t.Errorf("Expected pollCount to be 2, got %d", collector.GetPollCount())
-	}
-}
-
 func TestCollector_Collect_AllMetrics(t *testing.T) {
 	collector := NewCollector()
 	metrics := collector.Collect()
