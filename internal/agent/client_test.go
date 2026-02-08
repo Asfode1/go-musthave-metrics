@@ -1,6 +1,9 @@
 package agent
 
 import (
+	"compress/gzip"
+	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -9,23 +12,56 @@ import (
 )
 
 func TestClient_SendMetric(t *testing.T) {
-	
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			t.Errorf("Expected POST method, got %s", r.Method)
 		}
 
-		if r.Header.Get("Content-Type") != "text/plain" {
-			t.Errorf("Expected Content-Type to be text/plain, got %s", r.Header.Get("Content-Type"))
+		if r.Header.Get("Content-Type") != "application/json" {
+			t.Errorf("Expected Content-Type to be application/json, got %s", r.Header.Get("Content-Type"))
+		}
+		if r.Header.Get("Content-Encoding") != "gzip" {
+			t.Errorf("Expected Content-Encoding to be gzip, got %s", r.Header.Get("Content-Encoding"))
+		}
+		if r.Header.Get("Accept-Encoding") != "gzip" {
+			t.Errorf("Expected Accept-Encoding to be gzip, got %s", r.Header.Get("Accept-Encoding"))
 		}
 
-		expectedPath := "/update/counter/testMetric/42"
-		if r.URL.Path != expectedPath {
-			t.Errorf("Expected path %s, got %s", expectedPath, r.URL.Path)
+		if r.URL.Path != "/update" {
+			t.Errorf("Expected path /update, got %s", r.URL.Path)
 		}
 
+		gr, err := gzip.NewReader(r.Body)
+		if err != nil {
+			t.Fatalf("Failed to create gzip reader: %v", err)
+		}
+		b, err := io.ReadAll(gr)
+		_ = gr.Close()
+		_ = r.Body.Close()
+		if err != nil {
+			t.Fatalf("Failed to read gzipped body: %v", err)
+		}
+
+		var m model.Metrics
+		if err := json.Unmarshal(b, &m); err != nil {
+			t.Fatalf("Invalid JSON: %v", err)
+		}
+		if m.ID != "testMetric" || m.MType != model.Counter {
+			t.Fatalf("Unexpected metric: %+v", m)
+		}
+		if m.Delta == nil || *m.Delta != 42 {
+			t.Fatalf("Expected delta=42, got %+v", m.Delta)
+		}
+		if m.Value != nil {
+			t.Fatalf("Expected value=nil for counter, got %+v", m.Value)
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Content-Encoding", "gzip")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("OK"))
+		zw := gzip.NewWriter(w)
+		_ = json.NewEncoder(zw).Encode(m)
+		_ = zw.Close()
 	}))
 	defer server.Close()
 
@@ -45,11 +81,41 @@ func TestClient_SendMetric(t *testing.T) {
 
 func TestClient_SendMetric_Gauge(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		expectedPath := "/update/gauge/testGauge/3.14"
-		if r.URL.Path != expectedPath {
-			t.Errorf("Expected path %s, got %s", expectedPath, r.URL.Path)
+		if r.URL.Path != "/update" {
+			t.Errorf("Expected path /update, got %s", r.URL.Path)
 		}
+
+		gr, err := gzip.NewReader(r.Body)
+		if err != nil {
+			t.Fatalf("Failed to create gzip reader: %v", err)
+		}
+		b, err := io.ReadAll(gr)
+		_ = gr.Close()
+		_ = r.Body.Close()
+		if err != nil {
+			t.Fatalf("Failed to read gzipped body: %v", err)
+		}
+
+		var m model.Metrics
+		if err := json.Unmarshal(b, &m); err != nil {
+			t.Fatalf("Invalid JSON: %v", err)
+		}
+		if m.ID != "testGauge" || m.MType != model.Gauge {
+			t.Fatalf("Unexpected metric: %+v", m)
+		}
+		if m.Value == nil || *m.Value != 3.14 {
+			t.Fatalf("Expected value=3.14, got %+v", m.Value)
+		}
+		if m.Delta != nil {
+			t.Fatalf("Expected delta=nil for gauge, got %+v", m.Delta)
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Content-Encoding", "gzip")
 		w.WriteHeader(http.StatusOK)
+		zw := gzip.NewWriter(w)
+		_ = json.NewEncoder(zw).Encode(m)
+		_ = zw.Close()
 	}))
 	defer server.Close()
 

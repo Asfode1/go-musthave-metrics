@@ -77,6 +77,9 @@ func (r *Runner) Start() {
 				log.Printf("Failed to send metrics: %v", err)
 			} else {
 				log.Printf("Successfully sent %d metrics", len(currentMetrics))
+				// После успешной отправки сбрасываем PollCount,
+				// чтобы на сервер уходило приращение, а не абсолютное значение
+				r.collector.ResetPollCount()
 			}
 		}
 	}()

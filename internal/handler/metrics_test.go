@@ -1,10 +1,15 @@
 package handler
 
 import (
+	"bytes"
+	"compress/gzip"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
+	"github.com/Asfode1/go-musthave-metrics/internal/model"
+	"github.com/Asfode1/go-musthave-metrics/internal/mw"
 	"github.com/Asfode1/go-musthave-metrics/internal/storage"
 )
 
@@ -172,7 +177,7 @@ func TestMetricsHandler_Update_PollCount(t *testing.T) {
 	memStorage := storage.NewMemStorage()
 	handler := NewMetricsHandler(memStorage)
 
-	// PollCount должен использовать SetCounter (замену), а не UpdateCounter (суммирование)
+	// PollCount должен обрабатываться как обычный counter (приращение)
 	req1 := httptest.NewRequest(http.MethodPost, "/update/counter/PollCount/3", nil)
 	w1 := httptest.NewRecorder()
 	handler.Update(w1, req1)
@@ -185,7 +190,7 @@ func TestMetricsHandler_Update_PollCount(t *testing.T) {
 		t.Errorf("Expected 3, got %d", value)
 	}
 
-	// Второе обновление PollCount должно заменить значение, а не добавить
+	// Второе обновление PollCount должно добавить значение к существующему
 	req2 := httptest.NewRequest(http.MethodPost, "/update/counter/PollCount/5", nil)
 	w2 := httptest.NewRecorder()
 	handler.Update(w2, req2)
@@ -194,7 +199,110 @@ func TestMetricsHandler_Update_PollCount(t *testing.T) {
 	if !ok {
 		t.Fatal("PollCount should exist")
 	}
-	if value != 5 {
-		t.Errorf("Expected 5 (replaced), got %d", value)
+	if value != 8 {
+		t.Errorf("Expected 8 (3+5), got %d", value)
+	}
+}
+
+func TestMetricsHandler_UpdateJSON_Counter(t *testing.T) {
+	memStorage := storage.NewMemStorage()
+	h := NewMetricsHandler(memStorage)
+
+	delta := int64(42)
+	reqBody, _ := json.Marshal(model.Metrics{ID: "jsonCounter", MType: model.Counter, Delta: &delta})
+	req := httptest.NewRequest(http.MethodPost, "/update", bytes.NewReader(reqBody))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	h.UpdateJSON(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("Expected 200, got %d", w.Code)
+	}
+	if ct := w.Header().Get("Content-Type"); ct != "application/json" {
+		t.Fatalf("Expected application/json, got %s", ct)
+	}
+
+	var resp model.Metrics
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("Invalid JSON response: %v", err)
+	}
+	if resp.ID != "jsonCounter" || resp.MType != model.Counter || resp.Delta == nil || *resp.Delta != 42 {
+		t.Fatalf("Unexpected response: %+v", resp)
+	}
+}
+
+func TestMetricsHandler_ValueJSON_Gauge(t *testing.T) {
+	memStorage := storage.NewMemStorage()
+	h := NewMetricsHandler(memStorage)
+
+	// предварительно сохраним метрику
+	memStorage.UpdateGauge("jsonGauge", 3.14)
+
+	reqBody, _ := json.Marshal(model.Metrics{ID: "jsonGauge", MType: model.Gauge})
+	req := httptest.NewRequest(http.MethodPost, "/value", bytes.NewReader(reqBody))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	h.ValueJSON(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("Expected 200, got %d", w.Code)
+	}
+	if ct := w.Header().Get("Content-Type"); ct != "application/json" {
+		t.Fatalf("Expected application/json, got %s", ct)
+	}
+
+	var resp model.Metrics
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("Invalid JSON response: %v", err)
+	}
+	if resp.ID != "jsonGauge" || resp.MType != model.Gauge || resp.Value == nil || *resp.Value != 3.14 {
+		t.Fatalf("Unexpected response: %+v", resp)
+	}
+}
+
+func TestGzipMiddleware_RequestAndResponseJSON(t *testing.T) {
+	memStorage := storage.NewMemStorage()
+	h := NewMetricsHandler(memStorage)
+
+	// Собираем сервер: gzip middleware + /update JSON
+	handler := mw.Gzip(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		h.UpdateJSON(w, r)
+	}))
+
+	delta := int64(7)
+	rawBody, _ := json.Marshal(model.Metrics{ID: "gzCounter", MType: model.Counter, Delta: &delta})
+	var buf bytes.Buffer
+	zw := gzip.NewWriter(&buf)
+	_, _ = zw.Write(rawBody)
+	_ = zw.Close()
+
+	req := httptest.NewRequest(http.MethodPost, "/update", bytes.NewReader(buf.Bytes()))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Content-Encoding", "gzip")
+	req.Header.Set("Accept-Encoding", "gzip")
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("Expected 200, got %d", w.Code)
+	}
+	if w.Header().Get("Content-Encoding") != "gzip" {
+		t.Fatalf("Expected gzipped response")
+	}
+
+	gr, err := gzip.NewReader(w.Body)
+	if err != nil {
+		t.Fatalf("Failed to create gzip reader: %v", err)
+	}
+	defer gr.Close()
+	var resp model.Metrics
+	if err := json.NewDecoder(gr).Decode(&resp); err != nil {
+		t.Fatalf("Failed to decode gzipped JSON: %v", err)
+	}
+	if resp.ID != "gzCounter" || resp.MType != model.Counter || resp.Delta == nil || *resp.Delta != 7 {
+		t.Fatalf("Unexpected response: %+v", resp)
 	}
 }

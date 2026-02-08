@@ -79,3 +79,12 @@ func (c *Collector) Collect() []MetricValue {
 
 	return metrics
 }
+
+// ResetPollCount сбрасывает счетчик опросов в 0.
+// Используется агентом после успешной отправки метрик на сервер,
+// чтобы сервер получал приращение, а не абсолютное значение.
+func (c *Collector) ResetPollCount() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.pollCount = 0
+}
