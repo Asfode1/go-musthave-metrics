@@ -80,6 +80,30 @@ func (c *Collector) Collect() []MetricValue {
 	return metrics
 }
 
+// PollCountSnapshot возвращает текущее значение pollCount.
+// Используется репортером для формирования payload (до отправки).
+func (c *Collector) PollCountSnapshot() int64 {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.pollCount
+}
+
+// AckPollCount "подтверждает" отправленное значение PollCount:
+// вычитает sent из pollCount, не затрагивая новые инкременты, которые могли
+// произойти параллельно с отправкой.
+func (c *Collector) AckPollCount(sent int64) {
+	if sent <= 0 {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if sent >= c.pollCount {
+		c.pollCount = 0
+		return
+	}
+	c.pollCount -= sent
+}
+
 // ResetPollCount сбрасывает счетчик опросов в 0.
 // Используется агентом после успешной отправки метрик на сервер,
 // чтобы сервер получал приращение, а не абсолютное значение.
