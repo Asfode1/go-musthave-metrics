@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -54,6 +55,22 @@ func TestMetricsHandler_Update_Gauge(t *testing.T) {
 	}
 	if value != 3.14 {
 		t.Errorf("Expected 3.14, got %f", value)
+	}
+}
+
+func TestMetricsHandler_Update_PersistErrorDoesNotReturnOK(t *testing.T) {
+	memStorage := storage.NewMemStorage()
+	h := NewMetricsHandlerWithSaver(memStorage, func() error {
+		return errors.New("persist failed")
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/update/counter/testCounter/42", nil)
+	w := httptest.NewRecorder()
+
+	h.Update(w, req)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("Expected status 500, got %d", w.Code)
 	}
 }
 

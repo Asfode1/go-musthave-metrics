@@ -186,8 +186,6 @@ func (h *MetricsHandler) Update(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		h.storage.UpdateCounter(metricName, value)
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("OK"))
 
 	case model.Gauge:
 		value, err := strconv.ParseFloat(metricValue, 64)
@@ -196,8 +194,6 @@ func (h *MetricsHandler) Update(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		h.storage.UpdateGauge(metricName, value)
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("OK"))
 
 	default:
 		http.Error(w, "Invalid metric type", http.StatusBadRequest)
@@ -210,6 +206,10 @@ func (h *MetricsHandler) Update(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte("OK"))
 }
 
 func isJSONContentType(v string) bool {
