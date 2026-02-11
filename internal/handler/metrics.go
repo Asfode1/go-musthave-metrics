@@ -64,7 +64,17 @@ func (h *MetricsHandler) UpdateJSON(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "Delta is required for counter", http.StatusBadRequest)
 			return
 		}
+		// Get current value for potential rollback
+		oldVal, _ := h.storage.GetCounter(m.ID)
 		h.storage.UpdateCounter(m.ID, *m.Delta)
+		if h.saveFn != nil {
+			if err := h.saveFn(); err != nil {
+				// Rollback on persist failure
+				h.storage.SetCounter(m.ID, oldVal)
+				http.Error(w, "Failed to persist metrics", http.StatusInternalServerError)
+				return
+			}
+		}
 		if v, ok := h.storage.GetCounter(m.ID); ok {
 			m.Delta = &v
 		}
@@ -74,7 +84,21 @@ func (h *MetricsHandler) UpdateJSON(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "Value is required for gauge", http.StatusBadRequest)
 			return
 		}
+		// Get current value for potential rollback
+		oldVal, hadOld := h.storage.GetGauge(m.ID)
 		h.storage.UpdateGauge(m.ID, *m.Value)
+		if h.saveFn != nil {
+			if err := h.saveFn(); err != nil {
+				// Rollback on persist failure
+				if hadOld {
+					h.storage.UpdateGauge(m.ID, oldVal)
+				} else {
+					h.storage.DeleteGauge(m.ID)
+				}
+				http.Error(w, "Failed to persist metrics", http.StatusInternalServerError)
+				return
+			}
+		}
 		if v, ok := h.storage.GetGauge(m.ID); ok {
 			m.Value = &v
 		}
@@ -82,13 +106,6 @@ func (h *MetricsHandler) UpdateJSON(w http.ResponseWriter, r *http.Request) {
 	default:
 		http.Error(w, "Invalid metric type", http.StatusBadRequest)
 		return
-	}
-
-	if h.saveFn != nil {
-		if err := h.saveFn(); err != nil {
-			http.Error(w, "Failed to persist metrics", http.StatusInternalServerError)
-			return
-		}
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -229,7 +246,17 @@ func (h *MetricsHandler) Update(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "Invalid counter value", http.StatusBadRequest)
 			return
 		}
+		// Get current value for potential rollback
+		oldVal, _ := h.storage.GetCounter(metricName)
 		h.storage.UpdateCounter(metricName, value)
+		if h.saveFn != nil {
+			if err := h.saveFn(); err != nil {
+				// Rollback on persist failure
+				h.storage.SetCounter(metricName, oldVal)
+				http.Error(w, "Failed to persist metrics", http.StatusInternalServerError)
+				return
+			}
+		}
 
 	case model.Gauge:
 		value, err := strconv.ParseFloat(metricValue, 64)
@@ -237,18 +264,25 @@ func (h *MetricsHandler) Update(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "Invalid gauge value", http.StatusBadRequest)
 			return
 		}
+		// Get current value for potential rollback
+		oldVal, hadOld := h.storage.GetGauge(metricName)
 		h.storage.UpdateGauge(metricName, value)
+		if h.saveFn != nil {
+			if err := h.saveFn(); err != nil {
+				// Rollback on persist failure
+				if hadOld {
+					h.storage.UpdateGauge(metricName, oldVal)
+				} else {
+					h.storage.DeleteGauge(metricName)
+				}
+				http.Error(w, "Failed to persist metrics", http.StatusInternalServerError)
+				return
+			}
+		}
 
 	default:
 		http.Error(w, "Invalid metric type", http.StatusBadRequest)
 		return
-	}
-
-	if h.saveFn != nil {
-		if err := h.saveFn(); err != nil {
-			http.Error(w, "Failed to persist metrics", http.StatusInternalServerError)
-			return
-		}
 	}
 
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")

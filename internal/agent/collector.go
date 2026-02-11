@@ -34,6 +34,7 @@ func (c *Collector) Collect() []MetricValue {
 	c.mu.Lock()
 	c.pollCount++
 	pollCount := c.pollCount
+	randomValue := c.randomSeed.Float64()
 	c.mu.Unlock()
 
 	var m runtime.MemStats
@@ -74,7 +75,6 @@ func (c *Collector) Collect() []MetricValue {
 	metrics = append(metrics, MetricValue{Type: model.Counter, Name: "PollCount", Value: pollCount})
 
 	// Чтобы иметь тестовую метрику для проверки работы системы
-	randomValue := c.randomSeed.Float64()
 	metrics = append(metrics, MetricValue{Type: model.Gauge, Name: "RandomValue", Value: randomValue})
 
 	return metrics
@@ -104,11 +104,3 @@ func (c *Collector) AckPollCount(sent int64) {
 	c.pollCount -= sent
 }
 
-// ResetPollCount сбрасывает счетчик опросов в 0.
-// Используется агентом после успешной отправки метрик на сервер,
-// чтобы сервер получал приращение, а не абсолютное значение.
-func (c *Collector) ResetPollCount() {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.pollCount = 0
-}

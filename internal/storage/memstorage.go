@@ -78,3 +78,10 @@ func (s *MemStorage) GetAllGauges() map[string]float64 {
 	}
 	return result
 }
+
+// DeleteGauge удаляет gauge метрику
+func (s *MemStorage) DeleteGauge(name string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.gauges, name)
+}

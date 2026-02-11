@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"sync"
 	"time"
 
 	"github.com/Asfode1/go-musthave-metrics/internal/model"
@@ -15,6 +16,7 @@ import (
 
 // Persister сохраняет/восстанавливает метрики на диск.
 type Persister struct {
+	mu      sync.Mutex
 	storage *storage.MemStorage
 	path    string
 }
@@ -70,6 +72,9 @@ func (p *Persister) Save() error {
 	if p.path == "" {
 		return nil
 	}
+
+	p.mu.Lock()
+	defer p.mu.Unlock()
 
 	metrics := p.snapshot()
 	data, err := json.Marshal(metrics)
