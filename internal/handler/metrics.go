@@ -17,6 +17,15 @@ type MetricsHandler struct {
 	saveFn  func() error
 }
 
+type httpError struct {
+	status int
+	msg    string
+}
+
+func (e httpError) Error() string {
+	return e.msg
+}
+
 // NewMetricsHandler создает новый обработчик метрик
 func NewMetricsHandler(storage *storage.MemStorage) *MetricsHandler {
 	return &MetricsHandler{
@@ -45,7 +54,7 @@ func (h *MetricsHandler) UpdateJSON(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Failed to read body", http.StatusBadRequest)
 		return
 	}
-	defer r.Body.Close()
+	defer func() { _ = r.Body.Close() }()
 
 	var m model.Metrics
 	if err := json.Unmarshal(body, &m); err != nil {
@@ -53,36 +62,11 @@ func (h *MetricsHandler) UpdateJSON(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if m.ID == "" {
-		http.Error(w, "Metric id is required", http.StatusNotFound)
+	if err := validateMetric(m); err != nil {
+		http.Error(w, err.msg, err.status)
 		return
 	}
-
-	switch m.MType {
-	case model.Counter:
-		if m.Delta == nil {
-			http.Error(w, "Delta is required for counter", http.StatusBadRequest)
-			return
-		}
-		h.storage.UpdateCounter(m.ID, *m.Delta)
-		if v, ok := h.storage.GetCounter(m.ID); ok {
-			m.Delta = &v
-		}
-
-	case model.Gauge:
-		if m.Value == nil {
-			http.Error(w, "Value is required for gauge", http.StatusBadRequest)
-			return
-		}
-		h.storage.UpdateGauge(m.ID, *m.Value)
-		if v, ok := h.storage.GetGauge(m.ID); ok {
-			m.Value = &v
-		}
-
-	default:
-		http.Error(w, "Invalid metric type", http.StatusBadRequest)
-		return
-	}
+	m = h.applyMetric(m)
 
 	if h.saveFn != nil {
 		if err := h.saveFn(); err != nil {
@@ -96,6 +80,49 @@ func (h *MetricsHandler) UpdateJSON(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(m)
 }
 
+// UpdateBatchJSON обрабатывает POST /updates, принимает массив метрик в JSON и сохраняет их.
+func (h *MetricsHandler) UpdateBatchJSON(w http.ResponseWriter, r *http.Request) {
+	if !isJSONContentType(r.Header.Get("Content-Type")) && r.Header.Get("Content-Type") != "" {
+		http.Error(w, "Unsupported Media Type", http.StatusUnsupportedMediaType)
+		return
+	}
+
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		http.Error(w, "Failed to read body", http.StatusBadRequest)
+		return
+	}
+	defer func() { _ = r.Body.Close() }()
+
+	var metrics []model.Metrics
+	if err := json.Unmarshal(body, &metrics); err != nil {
+		http.Error(w, "Invalid JSON", http.StatusBadRequest)
+		return
+	}
+
+	for _, m := range metrics {
+		if err := validateMetric(m); err != nil {
+			http.Error(w, err.msg, err.status)
+			return
+		}
+	}
+
+	for i, m := range metrics {
+		metrics[i] = h.applyMetric(m)
+	}
+
+	if h.saveFn != nil {
+		if err := h.saveFn(); err != nil {
+			http.Error(w, "Failed to persist metrics", http.StatusInternalServerError)
+			return
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(metrics)
+}
+
 // Value обрабатывает GET /value/<ТИП>/<ИМЯ>
 func (h *MetricsHandler) Value(w http.ResponseWriter, r *http.Request) {
 	path := strings.TrimPrefix(r.URL.Path, "/value/")
@@ -107,8 +134,8 @@ func (h *MetricsHandler) Value(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	metricType := parts[0]
-	metricName := parts[1]
+	metricType := strings.TrimSpace(parts[0])
+	metricName := strings.TrimSpace(parts[1])
 	if metricName == "" {
 		http.Error(w, "Metric name is required", http.StatusNotFound)
 		return
@@ -152,7 +179,7 @@ func (h *MetricsHandler) ValueJSON(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Failed to read body", http.StatusBadRequest)
 		return
 	}
-	defer r.Body.Close()
+	defer func() { _ = r.Body.Close() }()
 
 	var req model.Metrics
 	if err := json.Unmarshal(body, &req); err != nil {
@@ -205,9 +232,9 @@ func (h *MetricsHandler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	metricType := parts[0]
-	metricName := parts[1]
-	metricValue := parts[2]
+	metricType := strings.TrimSpace(parts[0])
+	metricName := strings.TrimSpace(parts[1])
+	metricValue := strings.TrimSpace(parts[2])
 
 	// Проверяем наличие имени метрики (должно быть до парсинга значения)
 	if metricName == "" {
@@ -259,4 +286,39 @@ func (h *MetricsHandler) Update(w http.ResponseWriter, r *http.Request) {
 func isJSONContentType(v string) bool {
 	// допускаем параметры типа charset
 	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(v)), "application/json")
+}
+
+func validateMetric(m model.Metrics) *httpError {
+	if strings.TrimSpace(m.ID) == "" {
+		return &httpError{status: http.StatusNotFound, msg: "Metric id is required"}
+	}
+	switch m.MType {
+	case model.Counter:
+		if m.Delta == nil {
+			return &httpError{status: http.StatusBadRequest, msg: "Delta is required for counter"}
+		}
+	case model.Gauge:
+		if m.Value == nil {
+			return &httpError{status: http.StatusBadRequest, msg: "Value is required for gauge"}
+		}
+	default:
+		return &httpError{status: http.StatusBadRequest, msg: "Invalid metric type"}
+	}
+	return nil
+}
+
+func (h *MetricsHandler) applyMetric(m model.Metrics) model.Metrics {
+	switch m.MType {
+	case model.Counter:
+		h.storage.UpdateCounter(m.ID, *m.Delta)
+		if v, ok := h.storage.GetCounter(m.ID); ok {
+			m.Delta = &v
+		}
+	case model.Gauge:
+		h.storage.UpdateGauge(m.ID, *m.Value)
+		if v, ok := h.storage.GetGauge(m.ID); ok {
+			m.Value = &v
+		}
+	}
+	return m
 }

@@ -31,7 +31,7 @@ func Gzip(next http.Handler) http.Handler {
 		}
 
 		gw := &gzipResponseWriter{ResponseWriter: w}
-		defer gw.Close()
+		defer func() { _ = gw.Close() }()
 
 		next.ServeHTTP(gw, r)
 	})

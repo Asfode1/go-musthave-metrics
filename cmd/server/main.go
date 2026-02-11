@@ -58,6 +58,7 @@ func main() {
 
 	// Чтобы обрабатывать различные типы запросов к метрикам
 	r.Post("/update", metricsHandler.UpdateJSON)
+	r.Post("/updates", metricsHandler.UpdateBatchJSON)
 	r.Post("/value", metricsHandler.ValueJSON)
 	r.Post("/update/{type}/{name}/{value}", metricsHandler.Update)
 	r.Get("/value/{type}/{name}", metricsHandler.Value)

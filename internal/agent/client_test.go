@@ -205,3 +205,48 @@ func TestClient_SendMetrics_PartialError(t *testing.T) {
 		t.Fatal("Expected error for failed metric, got nil")
 	}
 }
+
+func TestClient_SendMetricsBatch(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Errorf("Expected POST method, got %s", r.Method)
+		}
+		if r.URL.Path != "/updates" {
+			t.Errorf("Expected path /updates, got %s", r.URL.Path)
+		}
+
+		gr, err := gzip.NewReader(r.Body)
+		if err != nil {
+			t.Fatalf("Failed to create gzip reader: %v", err)
+		}
+		b, err := io.ReadAll(gr)
+		_ = gr.Close()
+		_ = r.Body.Close()
+		if err != nil {
+			t.Fatalf("Failed to read gzipped body: %v", err)
+		}
+
+		var ms []model.Metrics
+		if err := json.Unmarshal(b, &ms); err != nil {
+			t.Fatalf("Invalid JSON: %v", err)
+		}
+		if len(ms) != 2 {
+			t.Fatalf("Expected 2 metrics, got %d", len(ms))
+		}
+
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL)
+
+	metrics := []MetricValue{
+		{Type: model.Counter, Name: "metric1", Value: int64(1)},
+		{Type: model.Gauge, Name: "metric2", Value: float64(2.5)},
+	}
+
+	err := client.SendMetricsBatch(metrics)
+	if err != nil {
+		t.Fatalf("Expected no error, got %v", err)
+	}
+}

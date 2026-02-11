@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/Asfode1/go-musthave-metrics/internal/model"
@@ -221,6 +222,146 @@ func TestMetricsHandler_Update_PollCount(t *testing.T) {
 	}
 }
 
+func TestMetricsHandler_Value_Counter(t *testing.T) {
+	memStorage := storage.NewMemStorage()
+	handler := NewMetricsHandler(memStorage)
+
+	memStorage.UpdateCounter("testCounter", 12)
+
+	req := httptest.NewRequest(http.MethodGet, "/value/counter/testCounter", nil)
+	w := httptest.NewRecorder()
+
+	handler.Value(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("Expected status 200, got %d", w.Code)
+	}
+	if ct := w.Header().Get("Content-Type"); ct != "text/plain; charset=utf-8" {
+		t.Fatalf("Expected text/plain response, got %s", ct)
+	}
+	if got := strings.TrimSpace(w.Body.String()); got != "12" {
+		t.Fatalf("Expected body 12, got %q", got)
+	}
+}
+
+func TestMetricsHandler_Value_Gauge(t *testing.T) {
+	memStorage := storage.NewMemStorage()
+	handler := NewMetricsHandler(memStorage)
+
+	memStorage.UpdateGauge("testGauge", 3.14)
+
+	req := httptest.NewRequest(http.MethodGet, "/value/gauge/testGauge", nil)
+	w := httptest.NewRecorder()
+
+	handler.Value(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("Expected status 200, got %d", w.Code)
+	}
+	if got := strings.TrimSpace(w.Body.String()); got != "3.14" {
+		t.Fatalf("Expected body 3.14, got %q", got)
+	}
+}
+
+func TestMetricsHandler_Value_NotFound(t *testing.T) {
+	memStorage := storage.NewMemStorage()
+	handler := NewMetricsHandler(memStorage)
+
+	req := httptest.NewRequest(http.MethodGet, "/value/counter/missing", nil)
+	w := httptest.NewRecorder()
+
+	handler.Value(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("Expected status 404, got %d", w.Code)
+	}
+}
+
+func TestMetricsHandler_Value_InvalidType(t *testing.T) {
+	memStorage := storage.NewMemStorage()
+	handler := NewMetricsHandler(memStorage)
+
+	req := httptest.NewRequest(http.MethodGet, "/value/invalid/test", nil)
+	w := httptest.NewRecorder()
+
+	handler.Value(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("Expected status 400, got %d", w.Code)
+	}
+}
+
+func TestMetricsHandler_Value_InvalidPath(t *testing.T) {
+	memStorage := storage.NewMemStorage()
+	handler := NewMetricsHandler(memStorage)
+
+	req := httptest.NewRequest(http.MethodGet, "/value/counter", nil)
+	w := httptest.NewRecorder()
+
+	handler.Value(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("Expected status 400, got %d", w.Code)
+	}
+}
+
+func TestMetricsHandler_UpdateBatchJSON(t *testing.T) {
+	memStorage := storage.NewMemStorage()
+	h := NewMetricsHandler(memStorage)
+
+	delta := int64(5)
+	value := 2.71
+	reqBody, _ := json.Marshal([]model.Metrics{
+		{ID: "batchCounter", MType: model.Counter, Delta: &delta},
+		{ID: "batchGauge", MType: model.Gauge, Value: &value},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/updates", bytes.NewReader(reqBody))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	h.UpdateBatchJSON(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("Expected 200, got %d", w.Code)
+	}
+	if ct := w.Header().Get("Content-Type"); ct != "application/json" {
+		t.Fatalf("Expected application/json, got %s", ct)
+	}
+
+	var resp []model.Metrics
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("Invalid JSON response: %v", err)
+	}
+	if len(resp) != 2 {
+		t.Fatalf("Expected 2 metrics in response, got %d", len(resp))
+	}
+	if v, ok := memStorage.GetCounter("batchCounter"); !ok || v != 5 {
+		t.Fatalf("Expected batchCounter=5, got %d (ok=%v)", v, ok)
+	}
+	if v, ok := memStorage.GetGauge("batchGauge"); !ok || v != 2.71 {
+		t.Fatalf("Expected batchGauge=2.71, got %f (ok=%v)", v, ok)
+	}
+}
+
+func TestMetricsHandler_UpdateBatchJSON_InvalidMetric(t *testing.T) {
+	memStorage := storage.NewMemStorage()
+	h := NewMetricsHandler(memStorage)
+
+	delta := int64(5)
+	reqBody, _ := json.Marshal([]model.Metrics{
+		{ID: "", MType: model.Counter, Delta: &delta},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/updates", bytes.NewReader(reqBody))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	h.UpdateBatchJSON(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("Expected 404, got %d", w.Code)
+	}
+}
+
 func TestMetricsHandler_UpdateJSON_Counter(t *testing.T) {
 	memStorage := storage.NewMemStorage()
 	h := NewMetricsHandler(memStorage)
@@ -314,7 +455,7 @@ func TestGzipMiddleware_RequestAndResponseJSON(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create gzip reader: %v", err)
 	}
-	defer gr.Close()
+	defer func() { _ = gr.Close() }()
 	var resp model.Metrics
 	if err := json.NewDecoder(gr).Decode(&resp); err != nil {
 		t.Fatalf("Failed to decode gzipped JSON: %v", err)

@@ -3,7 +3,7 @@ package agent
 import (
 	"errors"
 	"log"
-	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/Asfode1/go-musthave-metrics/internal/config"
@@ -45,8 +45,7 @@ func NewRunnerFromAgentConfig(cfg *config.AgentConfig) *Runner {
 // Start запускает сбор и отправку метрик
 func (r *Runner) Start() {
 	var (
-		metricsMu sync.RWMutex
-		metrics   []MetricValue
+		metricsStore atomic.Value // []MetricValue
 	)
 
 	// Чтобы собирать метрики с заданной периодичностью независимо от отправки
@@ -59,9 +58,7 @@ func (r *Runner) Start() {
 			// PollCount будет рассчитываться и подтверждаться (ack) в репортере,
 			// чтобы избежать потерь инкрементов при отправке.
 			newMetrics = withoutMetricName(newMetrics, "PollCount")
-			metricsMu.Lock()
-			metrics = newMetrics
-			metricsMu.Unlock()
+			metricsStore.Store(newMetrics)
 		}
 	}()
 
@@ -72,10 +69,7 @@ func (r *Runner) Start() {
 
 		for range ticker.C {
 			// Чтобы использовать актуальные метрики для отправки
-			metricsMu.RLock()
-			currentMetrics := make([]MetricValue, len(metrics))
-			copy(currentMetrics, metrics)
-			metricsMu.RUnlock()
+			currentMetrics := loadMetricsSnapshot(&metricsStore)
 
 			if err := r.reportOnce(currentMetrics); err != nil {
 				log.Printf("Failed to send metrics: %v", err)
@@ -102,19 +96,26 @@ func (r *Runner) reportOnce(metrics []MetricValue) error {
 	// иначе он может отправиться дважды (в SendMetrics и отдельным запросом ниже).
 	metrics = withoutMetricName(metrics, "PollCount")
 
-	// Сначала отправляем все метрики кроме PollCount. Ошибки отдельных метрик не мешают
-	// попытаться доставить остальные (SendMetrics продолжает отправку).
-	errOther := r.client.SendMetrics(metrics)
+	// Сначала отправляем все метрики кроме PollCount.
+	// Пытаемся батч-отправку, а при ошибке — fallback на поштучную отправку.
+	errOther := r.client.SendMetricsBatch(metrics)
+	if errOther != nil {
+		if errFallback := r.client.SendMetrics(metrics); errFallback == nil {
+			errOther = nil
+		} else {
+			errOther = errors.Join(errOther, errFallback)
+		}
+	}
 
 	// Затем отправляем PollCount отдельно и делаем ack только если он действительно доставлен.
 	pollCount := r.collector.PollCountSnapshot()
 	var errPoll error
 	if pollCount > 0 {
-		errPoll = r.client.SendMetric(MetricValue{
+		errPoll = sendMetricWithRetry(r.client, MetricValue{
 			Type:  model.Counter,
 			Name:  "PollCount",
 			Value: pollCount,
-		})
+		}, 3, 50*time.Millisecond)
 		if errPoll == nil {
 			r.collector.AckPollCount(pollCount)
 		}
@@ -124,6 +125,47 @@ func (r *Runner) reportOnce(metrics []MetricValue) error {
 		return nil
 	}
 	return errors.Join(errOther, errPoll)
+}
+
+func loadMetricsSnapshot(store *atomic.Value) []MetricValue {
+	if store == nil {
+		return nil
+	}
+	if v := store.Load(); v != nil {
+		if metrics, ok := v.([]MetricValue); ok {
+			out := make([]MetricValue, len(metrics))
+			copy(out, metrics)
+			return out
+		}
+	}
+	return nil
+}
+
+func sendMetricWithRetry(client *Client, metric MetricValue, attempts int, baseDelay time.Duration) error {
+	if client == nil {
+		return errors.New("client is nil")
+	}
+	if attempts <= 0 {
+		attempts = 1
+	}
+	if baseDelay <= 0 {
+		baseDelay = 10 * time.Millisecond
+	}
+
+	var err error
+	delay := baseDelay
+	for i := 0; i < attempts; i++ {
+		err = client.SendMetric(metric)
+		if err == nil {
+			return nil
+		}
+		if i == attempts-1 {
+			break
+		}
+		time.Sleep(delay)
+		delay *= 2
+	}
+	return err
 }
 
 func withoutMetricName(in []MetricValue, name string) []MetricValue {
