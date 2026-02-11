@@ -60,6 +60,7 @@ func main() {
 	r.Post("/update", metricsHandler.UpdateJSON)
 	r.Post("/value", metricsHandler.ValueJSON)
 	r.Post("/update/{type}/{name}/{value}", metricsHandler.Update)
+	r.Get("/value/{type}/{name}", metricsHandler.Value)
 
 	// Чтобы начать принимать HTTP запросы от агентов
 	server := &http.Server{

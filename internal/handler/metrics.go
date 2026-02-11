@@ -96,6 +96,50 @@ func (h *MetricsHandler) UpdateJSON(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(m)
 }
 
+// Value обрабатывает GET /value/<ТИП>/<ИМЯ>
+func (h *MetricsHandler) Value(w http.ResponseWriter, r *http.Request) {
+	path := strings.TrimPrefix(r.URL.Path, "/value/")
+	path = strings.TrimSuffix(path, "/")
+	parts := strings.Split(path, "/")
+
+	if len(parts) != 2 {
+		http.Error(w, "Invalid path format", http.StatusBadRequest)
+		return
+	}
+
+	metricType := parts[0]
+	metricName := parts[1]
+	if metricName == "" {
+		http.Error(w, "Metric name is required", http.StatusNotFound)
+		return
+	}
+
+	var out string
+	switch metricType {
+	case model.Counter:
+		value, ok := h.storage.GetCounter(metricName)
+		if !ok {
+			http.Error(w, "Metric not found", http.StatusNotFound)
+			return
+		}
+		out = strconv.FormatInt(value, 10)
+	case model.Gauge:
+		value, ok := h.storage.GetGauge(metricName)
+		if !ok {
+			http.Error(w, "Metric not found", http.StatusNotFound)
+			return
+		}
+		out = strconv.FormatFloat(value, 'f', -1, 64)
+	default:
+		http.Error(w, "Invalid metric type", http.StatusBadRequest)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte(out))
+}
+
 // ValueJSON обрабатывает POST /value, возвращает значение метрики по JSON-запросу.
 func (h *MetricsHandler) ValueJSON(w http.ResponseWriter, r *http.Request) {
 	if !isJSONContentType(r.Header.Get("Content-Type")) && r.Header.Get("Content-Type") != "" {
